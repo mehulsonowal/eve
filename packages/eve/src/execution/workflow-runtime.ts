@@ -47,6 +47,7 @@ import { buildRunContext } from "#execution/runtime-context.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { walkCauseChain } from "#shared/errors.js";
+import type { SessionCancelCause } from "#harness/turn-cancellation.js";
 import {
   sessionCancelHookToken,
   type TurnCancelPayload,
@@ -256,10 +257,49 @@ export function createWorkflowRuntime(config: {
 export async function requestWorkflowTurnCancellation(
   input: CancelTurnInput,
 ): Promise<CancelTurnResult> {
-  const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
+  const payload: { kind: "turn"; turnId?: string } = { kind: "turn" };
+  if (input.turnId !== undefined) payload.turnId = input.turnId;
+
+  return await requestWorkflowCancellation(input.sessionId, payload);
+}
+
+/**
+ * Gracefully cancels a whole session: an in-flight turn observes the signal
+ * and settles `turn.cancelled` → `session.completed`. A session with no
+ * live turn to settle through (parked between turns, or its cancel hook
+ * unclaimed) is hard-cancelled at the workflow-engine level instead, so the
+ * session is terminal either way.
+ */
+export async function requestWorkflowSessionCancellation(input: {
+  readonly cause: SessionCancelCause;
+  readonly sessionId: string;
+}): Promise<CancelTurnResult> {
+  const result = await requestWorkflowCancellation(input.sessionId, {
+    cause: input.cause,
+    kind: "session",
+  });
+  if (result.status !== "no_active_turn") {
+    return result;
+  }
 
   try {
-    await resumeHook(sessionCancelHookToken(input.sessionId), payload);
+    await cancelRun(await getWorld(), input.sessionId, {
+      cancelReason: `Session cancelled (${input.cause})`,
+    });
+  } catch (error) {
+    if (!isAlreadyTerminalSessionError(error)) {
+      throw error;
+    }
+  }
+  return { status: "accepted" };
+}
+
+async function requestWorkflowCancellation(
+  sessionId: string,
+  payload: TurnCancelPayload,
+): Promise<CancelTurnResult> {
+  try {
+    await resumeHook(sessionCancelHookToken(sessionId), payload);
     return { status: "accepted" };
   } catch (error) {
     if (isInactiveCancelTarget(error)) {

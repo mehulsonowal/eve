@@ -14,6 +14,7 @@ import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { settleCancelledSessionStep } from "#execution/settle-cancelled-turn-step.js";
 import {
   createTurnCancellationControl,
   type TurnCancellationControl,
@@ -107,7 +108,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     while (true) {
       const result = await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal));
 
-      if (result.action === "cancelled") {
+      if (result.action === "cancelled" || result.action === "session-cancelled") {
         // No `canPark` check here: that gate rejects model-authored waits
         // (`next: null`) in task mode, whereas a cancelled turn parks by
         // design and its parkability was already established when the
@@ -120,6 +121,15 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           sessionState: cursor.sessionState,
         });
         await cancellation?.dispose();
+        if (result.action === "session-cancelled") {
+          const settled = await settleCancelledSessionStep({
+            parentWritable: cursor.parentWritable,
+            serializedContext: cursor.serializedContext,
+            sessionState: cursor.sessionState,
+          });
+          await cursor.finish(settled, { kind: "done", output: "" }, bufferedDeliveries);
+          return;
+        }
         await cursor.finish(
           { sessionState: cursor.sessionState },
           { cancelled: true, kind: "park" },

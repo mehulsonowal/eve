@@ -6,6 +6,7 @@ import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { settleCancelledSessionStep } from "#execution/settle-cancelled-turn-step.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import {
   TURN_WORKFLOW_INPUT_VERSION,
@@ -48,6 +49,11 @@ vi.mock("./dispatch-workflow-runtime-actions-step.js", () => ({
 
 vi.mock("./cancel-descendant-turns-step.js", () => ({
   cancelDescendantTurnsStep: vi.fn(),
+}));
+
+vi.mock("./settle-cancelled-turn-step.js", () => ({
+  settleCancelledTurnStep: vi.fn(),
+  settleCancelledSessionStep: vi.fn(),
 }));
 
 vi.mock("./workflow-callback-url.js", () => ({
@@ -294,6 +300,42 @@ describe("turnWorkflow", () => {
       kind: "turn-result",
     });
     expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-error")).toEqual([]);
+  });
+
+  it("terminally completes a session-limit cancellation", async () => {
+    const sessionState = createSessionState();
+    const settledState = createSessionState({ continuationToken: "http:settled" });
+    installInbox([]);
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "session-cancelled",
+      serializedContext: { state: "cancelled" },
+      sessionState,
+    });
+    vi.mocked(settleCancelledSessionStep).mockResolvedValueOnce({
+      serializedContext: { state: "settled" },
+      sessionState: settledState,
+    });
+
+    const { input, parentWritable } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    expect(settleCancelledSessionStep).toHaveBeenCalledWith({
+      parentWritable,
+      serializedContext: { state: "start" },
+      sessionState,
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
+      action: {
+        kind: "done",
+        output: "",
+        serializedContext: { state: "settled" },
+        sessionState: settledState,
+      },
+      kind: "turn-result",
+    });
   });
 
   it("runs uncancellable when the session cancel token is claimed by another run", async () => {

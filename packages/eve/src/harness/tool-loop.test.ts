@@ -44,7 +44,7 @@ import {
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
+import { isSessionCancellation, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getSessionTokenLimitViolation,
   getSessionTokenUsage,
@@ -1281,7 +1281,7 @@ describe("createToolLoopHarness", () => {
     // execution layer settles as `turn.cancelled` → `session.waiting` (and,
     // for delegated sessions, escalates to a root-turn cancel). No failure
     // or completion events are emitted here.
-    await expect(declined).rejects.toSatisfy((error) => isSessionLimitDecline(error));
+    await expect(declined).rejects.toSatisfy((error) => isSessionCancellation(error));
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
     expect(events.some((event) => event.type === "session.completed")).toBe(false);
@@ -1303,7 +1303,7 @@ describe("createToolLoopHarness", () => {
     // The delegating parent must never receive an error result it could
     // retry against a fresh budget share: task-mode declines throw the same
     // decline-flavored cancellation instead of failing the step.
-    await expect(declined).rejects.toSatisfy((error) => isSessionLimitDecline(error));
+    await expect(declined).rejects.toSatisfy((error) => isSessionCancellation(error));
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
   });

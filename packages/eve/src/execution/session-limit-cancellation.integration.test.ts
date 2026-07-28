@@ -14,11 +14,10 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 /**
  * Declining a session-limit continuation prompt cancels the in-flight turn
- * tree through the standard cancellation path: `turn.cancelled` →
- * `session.waiting`, zero failure events, and a session that stays
- * resumable. A delegated child's decline cancels the root turn, so the
- * delegating parent never receives an error result it could retry against a
- * fresh budget share.
+ * tree and terminally completes the session: `turn.cancelled` →
+ * `session.completed`, with zero failure events. A delegated child's decline
+ * cancels and completes the root session, so the delegating parent never
+ * receives an error result it could retry against a fresh budget share.
  */
 
 const FAILURE_EVENT_TYPES = ["step.failed", "turn.failed", "session.failed"] as const;
@@ -109,7 +108,7 @@ function requestIdFromPromptTurn(events: readonly HandleMessageStreamEvent[]): s
 }
 
 describe("session-limit continuation decline integration", () => {
-  it("cancels the turn and keeps the session resumable when the user declines", async () => {
+  it("cancels the turn and terminally completes the session when the user declines", async () => {
     const runtime = createTestRuntime({
       agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-decline-root" },
     });
@@ -143,41 +142,29 @@ describe("session-limit continuation decline integration", () => {
         expect(promptTurn.at(-1)?.type).toBe("session.waiting");
         const requestId = requestIdFromPromptTurn(promptTurn);
 
-        // Declining settles the turn as cancelled — a user decision, not an
-        // error, and not a session end.
+        // Declining settles the turn as cancelled and terminally completes
+        // the session — a user decision, not an error.
         await deliver(continuationToken, {
           kind: "deliver",
           payloads: [{ inputResponses: [{ optionId: "stop", requestId }] }],
         });
         const declinedTurn = await stream.nextTurn();
 
-        expect(declinedTurn.at(-1)?.type).toBe("session.waiting");
+        expect(declinedTurn.at(-1)?.type).toBe("session.completed");
         expect(
           containsEventSequence(declinedTurn, [
             "turn.started",
             "turn.cancelled",
-            "session.waiting",
+            "session.completed",
           ]),
         ).toBe(true);
         expect(filterEventsByType(declinedTurn, "turn.cancelled")).toHaveLength(1);
-        expect(filterEventsByType(declinedTurn, "session.completed")).toHaveLength(0);
+        expect(filterEventsByType(declinedTurn, "session.waiting")).toHaveLength(0);
         expectNoFailureEvents(declinedTurn);
-
-        // The session stays over budget, so the next message re-raises the
-        // prompt (fail-closed) instead of running a model call.
-        await deliver(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "try again" }],
-        });
-        const repromptTurn = await stream.nextTurn();
-
-        expect(repromptTurn.at(-1)?.type).toBe("session.waiting");
-        expect(filterEventsByType(repromptTurn, "input.requested")).toHaveLength(1);
-        expect(filterEventsByType(repromptTurn, "turn.cancelled")).toHaveLength(0);
-        expectNoFailureEvents(repromptTurn);
+        await waitForRunCompletion(run.runId);
       } finally {
         stream.dispose();
-        await run.cancel();
+        await run.cancel().catch(() => undefined);
       }
     });
   }, 60_000);
@@ -216,34 +203,26 @@ describe("session-limit continuation decline integration", () => {
 
         const cancelHook = await waitForHookByToken(sessionCancelHookToken(run.runId));
 
-        // Declining the child's prompt cancels the root turn. The waiting
-        // boundary is already on the stream, so settling emits nothing new;
-        // the turn run completing is the settle barrier.
+        // Declining the child's prompt cancels and terminally completes the
+        // root session. Its proxied waiting boundary is already on the
+        // stream, so finalization appends only the terminal session boundary.
         await deliver(continuationToken, {
           kind: "deliver",
           payloads: [{ inputResponses: [{ optionId: "stop", requestId }] }],
         });
         await waitForRunCompletion(cancelHook.runId);
+        const finalized = await stream.nextTurn();
 
-        // The session accepts the next message; the root itself is over
-        // budget, so it re-raises its own prompt. Anything from the old
-        // decline path — a parent-visible subagent error, a retry
-        // re-dispatch, a model reply — would surface here instead.
-        await deliver(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up after decline" }],
-        });
-        const followUpTurn = await stream.nextTurn();
-
-        expect(followUpTurn.at(-1)?.type).toBe("session.waiting");
-        expect(filterEventsByType(followUpTurn, "input.requested")).toHaveLength(1);
-        expect(filterEventsByType(followUpTurn, "subagent.called")).toHaveLength(0);
-        expect(filterEventsByType(followUpTurn, "message.completed")).toHaveLength(0);
-        expect(filterEventsByType(followUpTurn, "session.completed")).toHaveLength(0);
-        expectNoFailureEvents(followUpTurn);
+        expect(finalized.map((event) => event.type)).toEqual([
+          "turn.started",
+          "turn.cancelled",
+          "session.completed",
+        ]);
+        expectNoFailureEvents(finalized);
+        await waitForRunCompletion(run.runId);
       } finally {
         stream.dispose();
-        await run.cancel();
+        await run.cancel().catch(() => undefined);
       }
     });
   }, 60_000);

@@ -22,7 +22,7 @@ import {
 } from "#harness/emission.js";
 import { setPendingInputBatch } from "#harness/input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
-import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";
+import { SessionCancelledError } from "#harness/turn-cancellation.js";
 import {
   bumpSessionRuntimeTokenLimits,
   getSessionTokenLimitViolation,
@@ -47,13 +47,13 @@ interface SessionLimitPolicyInput {
  * {@link bumpSessionRuntimeTokenLimits} and lets the step continue
  * transparently.
  * Declined: a user decision, not an error — the decline cancels the
- * in-flight turn tree through the standard cancellation path, settling as
- * `turn.cancelled` → `session.waiting` with no failure surfaced anywhere.
+ * in-flight turn tree and terminally completes the root session, settling as
+ * `turn.cancelled` → `session.completed` with no failure surfaced anywhere.
  * The harness only declares the intent by throwing
- * {@link SessionLimitDeclinedError}; the execution layer detects it at the
- * step boundary and cancels the root turn, whose cancelled arm cascades to
- * every descendant, so the delegating parent never receives an error result
- * it could retry against a fresh budget share.
+ * {@link SessionCancelledError}; the execution layer detects it at the
+ * step boundary and terminally cancels the root turn, whose cancelled arm
+ * cascades to every descendant, so the delegating parent never receives an
+ * error result it could retry against a fresh budget share.
  *
  * Returns `result: null` when the step should continue with `session`.
  */
@@ -71,14 +71,13 @@ export async function applySessionLimitContinuation(
   }
 
   // A session parked on the continuation prompt always satisfies the
-  // cancelled-park guard (conversation mode, or a continuation token
+  // cancellation-settle guard (conversation mode, or a continuation token
   // anchoring it to a waiting parent) — parking the prompt required one of
-  // the two. The terminal fallback covers any future caller that resolves
-  // a decline outside that state, where a thrown cancellation could not
-  // settle as a park.
-  const canSettleCancelledPark =
+  // the two. The fallback covers any future caller that resolves a decline
+  // outside that state, where a thrown cancellation could not settle.
+  const canSettleCancellation =
     input.config.mode === "conversation" || input.session.continuationToken !== "";
-  if (!canSettleCancelledPark) {
+  if (!canSettleCancellation) {
     const violation = getSessionTokenLimitViolation(input.session);
     return {
       result:
@@ -89,7 +88,7 @@ export async function applySessionLimitContinuation(
     };
   }
 
-  throw new SessionLimitDeclinedError();
+  throw new SessionCancelledError("limit-declined");
 }
 
 /**

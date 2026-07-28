@@ -6,6 +6,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
+  requestWorkflowSessionCancellation,
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
@@ -151,16 +152,68 @@ describe("createWorkflowRuntime#cancelTurn", () => {
     await expect(
       buildRuntime().cancelTurn({ sessionId: "session-1", turnId: "turn-2" }),
     ).resolves.toEqual({ status: "accepted" });
-    expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", { turnId: "turn-2" });
+    expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", {
+      kind: "turn",
+      turnId: "turn-2",
+    });
   });
 
-  it("uses an empty payload for an unguarded cancel", async () => {
+  it("identifies an unguarded turn cancellation", async () => {
     resumeHookMock.mockResolvedValue({ runId: "turn-run" });
 
     await expect(buildRuntime().cancelTurn({ sessionId: "session-1" })).resolves.toEqual({
       status: "accepted",
     });
-    expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", {});
+    expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", { kind: "turn" });
+  });
+
+  it("delivers a graceful session cancellation to a live turn", async () => {
+    resumeHookMock.mockResolvedValue({ runId: "turn-run" });
+
+    await expect(
+      requestWorkflowSessionCancellation({
+        cause: "limit-declined",
+        sessionId: "session-1",
+      }),
+    ).resolves.toEqual({ status: "accepted" });
+    expect(resumeHookMock).toHaveBeenCalledWith("session-1:cancel", {
+      cause: "limit-declined",
+      kind: "session",
+    });
+    expect(cancelRunMock).not.toHaveBeenCalled();
+  });
+
+  it("hard-cancels the run when no live turn can settle the session", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    const world = {};
+    getWorldMock.mockResolvedValue(world);
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("session-1:cancel"));
+    cancelRunMock.mockResolvedValue(undefined);
+
+    await expect(
+      requestWorkflowSessionCancellation({
+        cause: "limit-declined",
+        sessionId: "session-1",
+      }),
+    ).resolves.toEqual({ status: "accepted" });
+    expect(cancelRunMock).toHaveBeenCalledWith(world, "session-1", {
+      cancelReason: "Session cancelled (limit-declined)",
+    });
+  });
+
+  it("treats an already-terminal run as a successful hard cancel", async () => {
+    const { HookNotFoundError, WorkflowRunNotFoundError } =
+      await import("#compiled/@workflow/errors/index.js");
+    getWorldMock.mockResolvedValue({});
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("session-1:cancel"));
+    cancelRunMock.mockRejectedValue(new WorkflowRunNotFoundError("session-1"));
+
+    await expect(
+      requestWorkflowSessionCancellation({
+        cause: "limit-declined",
+        sessionId: "session-1",
+      }),
+    ).resolves.toEqual({ status: "accepted" });
   });
 
   it("maps missing and terminal targets to 'no_active_turn'", async () => {

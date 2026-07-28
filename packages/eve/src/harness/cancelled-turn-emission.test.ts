@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
+import { emitCancelledSession, emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 describe("emitCancelledTurn", () => {
@@ -48,5 +48,18 @@ describe("emitCancelledTurn", () => {
     expect(next.sessionStarted).toBe(true);
     expect(next.sequence).toBe(1);
     expect(next.turnId).toBe("");
+  });
+
+  it("terminally completes a cancelled session without parking it", async () => {
+    const events: HandleMessageStreamEvent[] = [];
+
+    await emitCancelledSession(
+      async (event) => {
+        events.push(event);
+      },
+      { sessionStarted: true, sequence: 3, stepIndex: 2, turnId: "turn_3" },
+    );
+
+    expect(events.map((event) => event.type)).toEqual(["turn.cancelled", "session.completed"]);
   });
 });

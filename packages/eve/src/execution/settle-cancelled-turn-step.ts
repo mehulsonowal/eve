@@ -11,7 +11,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
-import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
+import { emitCancelledSession, emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import {
   getHarnessEmissionState,
   isHarnessBetweenTurns,
@@ -24,6 +24,7 @@ import {
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
+  createSessionCompletedEvent,
   encodeMessageStreamEvent,
   type HandleMessageStreamEvent,
   timestampHandleMessageStreamEvent,
@@ -35,19 +36,40 @@ export interface CancelledTurnSettleResult {
   readonly sessionState: DurableSessionState;
 }
 
-/**
- * Settles one cancelled turn: emits `turn.cancelled` → `session.waiting`,
- * drops pending runtime-action state, and persists the between-turns
- * session. Runs in the *driver* run, whose wake sources exclude the
- * cancel hook, so a queued cancel wake cannot re-dispatch it.
- */
-export async function settleCancelledTurnStep(input: {
+interface CancelledTurnSettleInput {
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<CancelledTurnSettleResult> {
+}
+
+/**
+ * Settles ordinary turn cancellation as `turn.cancelled` →
+ * `session.waiting`.
+ */
+export async function settleCancelledTurnStep(
+  input: CancelledTurnSettleInput,
+): Promise<CancelledTurnSettleResult> {
   "use step";
 
+  return await settleCancelledTurn(input, "waiting");
+}
+
+/**
+ * Settles a graceful session cancellation as `turn.cancelled` →
+ * `session.completed`.
+ */
+export async function settleCancelledSessionStep(
+  input: CancelledTurnSettleInput,
+): Promise<CancelledTurnSettleResult> {
+  "use step";
+
+  return await settleCancelledTurn(input, "completed");
+}
+
+async function settleCancelledTurn(
+  input: CancelledTurnSettleInput,
+  boundary: "completed" | "waiting",
+): Promise<CancelledTurnSettleResult> {
   const durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
@@ -69,7 +91,7 @@ export async function settleCancelledTurnStep(input: {
   const alreadyEpilogued =
     isHarnessBetweenTurns(session) && hasProxyInputRequests(durableSession.state);
 
-  if (!alreadyEpilogued) {
+  if (!alreadyEpilogued || boundary === "completed") {
     const writer = input.parentWritable.getWriter();
     try {
       const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
@@ -85,8 +107,15 @@ export async function settleCancelledTurnStep(input: {
             registry: bundle.hookRegistry,
           });
         };
+        if (alreadyEpilogued) {
+          await emit(createSessionCompletedEvent());
+          return { result: emissionState, session: enrichedSession };
+        }
         return {
-          result: await emitCancelledTurn(emit, emissionState, enrichedSession.continuationToken),
+          result:
+            boundary === "completed"
+              ? await emitCancelledSession(emit, emissionState)
+              : await emitCancelledTurn(emit, emissionState, enrichedSession.continuationToken),
           session: enrichedSession,
         };
       });

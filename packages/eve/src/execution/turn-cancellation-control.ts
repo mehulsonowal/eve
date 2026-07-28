@@ -5,7 +5,7 @@ import {
   sessionCancelHookToken,
   type TurnCancelPayload,
 } from "#execution/turn-cancellation-token.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { SessionCancelledError, TurnCancelledError } from "#harness/turn-cancellation.js";
 
 /**
  * Owns one turn's cancellation surface inside the turn workflow: the
@@ -53,8 +53,12 @@ export async function createTurnCancellationControl(input: {
   const controller = new AbortController();
   // The durable abort fires in the read's continuation so its call site
   // is reached deterministically on every replay.
-  const requested = consumeMatchingCancel(iterator, input.expectedTurnId).then(() => {
-    controller.abort(new TurnCancelledError());
+  const requested = consumeMatchingCancel(iterator, input.expectedTurnId).then((payload) => {
+    controller.abort(
+      payload.kind === "session"
+        ? new SessionCancelledError(payload.cause)
+        : new TurnCancelledError(),
+    );
     return "cancel" as const;
   });
 
@@ -77,11 +81,11 @@ export async function createTurnCancellationControl(input: {
 async function consumeMatchingCancel(
   iterator: AsyncIterator<TurnCancelPayload>,
   expectedTurnId: string,
-): Promise<void> {
+): Promise<TurnCancelPayload> {
   while (true) {
     const next = await iterator.next();
     if (next.done) return await new Promise<never>(() => {});
-    if (matchesActiveTurn(next.value, expectedTurnId)) return;
+    if (matchesActiveTurn(next.value, expectedTurnId)) return next.value;
   }
 }
 

@@ -8,35 +8,51 @@ export class TurnCancelledError extends Error {
   }
 }
 
-/**
- * A turn cancellation raised when the user declines a session-limit
- * continuation prompt. Carries intent only — the execution layer detects it
- * at the step boundary and cancels the root turn, so a delegated child's
- * decline stops the whole delegation tree. Keeps the harness free of
- * cross-session cancellation authority.
- */
-export class SessionLimitDeclinedError extends TurnCancelledError {
-  readonly sessionLimitDeclined = true;
+/** Why a session was gracefully cancelled. */
+export type SessionCancelCause = "limit-declined";
 
-  constructor() {
-    super("The user declined a fresh session token budget.");
+const SESSION_CANCEL_MESSAGES: Record<SessionCancelCause, string> = {
+  "limit-declined": "The user declined a fresh session token budget.",
+};
+
+/**
+ * A turn cancellation that terminally ends the whole session instead of
+ * parking it. Carries intent only — the execution layer detects it at the
+ * step boundary and settles `turn.cancelled` → `session.completed`. Keeps
+ * the harness free of cross-session cancellation authority.
+ */
+export class SessionCancelledError extends TurnCancelledError {
+  readonly sessionCancelCause: SessionCancelCause;
+
+  constructor(cause: SessionCancelCause) {
+    super(SESSION_CANCEL_MESSAGES[cause]);
+    this.sessionCancelCause = cause;
   }
 }
 
-/** True when the error, or one of its causes, marks a session-limit decline. */
-export function isSessionLimitDecline(error: unknown): boolean {
+/**
+ * Extracts the session-cancellation cause carried by the error or one of
+ * its causes; `undefined` for ordinary turn cancellations.
+ */
+export function getSessionCancelCause(error: unknown): SessionCancelCause | undefined {
   let current: unknown = error;
   const seen = new Set<unknown>();
 
   while (typeof current === "object" && current !== null && !seen.has(current)) {
     seen.add(current);
-    if ((current as { sessionLimitDeclined?: unknown }).sessionLimitDeclined === true) {
-      return true;
+    const cause = (current as { sessionCancelCause?: unknown }).sessionCancelCause;
+    if (cause === "limit-declined") {
+      return cause;
     }
     current = (current as { cause?: unknown }).cause;
   }
 
-  return false;
+  return undefined;
+}
+
+/** True when the error, or one of its causes, terminally cancels the session. */
+export function isSessionCancellation(error: unknown): boolean {
+  return getSessionCancelCause(error) !== undefined;
 }
 
 /** True when the error, or one of its causes, is a {@link TurnCancelledError}. */

@@ -452,9 +452,10 @@ export interface TurnFailedStreamEvent {
 
 /**
  * Stream event emitted when one turn is cancelled before reaching a
- * terminal outcome. Cancellation is not failure: the turn ends without
- * `turn.failed`/`session.failed`, is followed by `session.waiting`, and
- * the session accepts the next message normally.
+ * successful outcome. Cancellation is not failure: the turn ends without
+ * `turn.failed`/`session.failed`. Ordinary cancellation is followed by
+ * `session.waiting`; a terminal user decision is followed by
+ * `session.completed`.
  */
 export interface TurnCancelledStreamEvent {
   data: {

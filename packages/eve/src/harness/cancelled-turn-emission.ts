@@ -1,12 +1,19 @@
-import { createSessionWaitingEvent, createTurnCancelledEvent } from "#protocol/message.js";
+import {
+  createSessionCompletedEvent,
+  createSessionWaitingEvent,
+  createTurnCancelledEvent,
+} from "#protocol/message.js";
 import type { HarnessEmitFn } from "#harness/types.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 import { activeTurnId } from "#harness/active-turn-id.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 
 /**
- * Emits the cancelled-turn epilogue: `turn.cancelled` → `session.waiting`
- * (never a failure event) and returns the between-turns emission state.
+ * Emits the cancelled-turn epilogue (never a failure event) and returns the
+ * between-turns emission state. Ordinary turn cancellation parks on
+ * `session.waiting`; terminal session cancellation ends on
+ * `session.completed`.
  *
  * `state` is the last *persisted* emission state, which may predate the
  * cancelled turn's preamble — the turn id is reconstructed via
@@ -17,13 +24,33 @@ export async function emitCancelledTurn(
   state: HarnessEmissionState,
   continuationToken: string,
 ): Promise<HarnessEmissionState> {
+  return await emitCancelledTurnBoundary(
+    emitFn,
+    state,
+    createSessionWaitingEvent(continuationToken),
+  );
+}
+
+/** Emits the terminal boundary for a gracefully cancelled session. */
+export async function emitCancelledSession(
+  emitFn: HarnessEmitFn,
+  state: HarnessEmissionState,
+): Promise<HarnessEmissionState> {
+  return await emitCancelledTurnBoundary(emitFn, state, createSessionCompletedEvent());
+}
+
+async function emitCancelledTurnBoundary(
+  emitFn: HarnessEmitFn,
+  state: HarnessEmissionState,
+  boundary: HandleMessageStreamEvent,
+): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCancelledEvent({
       sequence: state.sequence,
       turnId: activeTurnId(state),
     }),
   );
-  await emitFn(createSessionWaitingEvent(continuationToken));
+  await emitFn(boundary);
 
   return {
     sessionStarted: true,

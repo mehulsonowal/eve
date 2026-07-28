@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  isSessionLimitDecline,
+  getSessionCancelCause,
+  isSessionCancellation,
   isTurnCancellation,
-  SessionLimitDeclinedError,
+  SessionCancelledError,
   throwIfTurnAborted,
   TurnCancelledError,
 } from "#harness/turn-cancellation.js";
@@ -52,30 +53,33 @@ describe("isTurnCancellation", () => {
   });
 });
 
-describe("SessionLimitDeclinedError", () => {
-  it("is a turn cancellation carrying the decline marker", () => {
-    const error = new SessionLimitDeclinedError();
+describe("SessionCancelledError", () => {
+  it("is a turn cancellation carrying the cancel cause", () => {
+    const error = new SessionCancelledError("limit-declined");
     // Keeps the canonical name so every existing cancellation check matches.
     expect(error.name).toBe("TurnCancelledError");
     expect(isTurnCancellation(error)).toBe(true);
-    expect(isSessionLimitDecline(error)).toBe(true);
+    expect(isSessionCancellation(error)).toBe(true);
+    expect(getSessionCancelCause(error)).toBe("limit-declined");
   });
 });
 
-describe("isSessionLimitDecline", () => {
+describe("getSessionCancelCause", () => {
   it("walks the cause chain and ignores plain cancellations", () => {
-    const wrapped = new Error("outer", { cause: new SessionLimitDeclinedError() });
-    expect(isSessionLimitDecline(wrapped)).toBe(true);
+    const wrapped = new Error("outer", { cause: new SessionCancelledError("limit-declined") });
+    expect(getSessionCancelCause(wrapped)).toBe("limit-declined");
 
-    expect(isSessionLimitDecline(new TurnCancelledError())).toBe(false);
-    expect(isSessionLimitDecline(undefined)).toBe(false);
+    expect(getSessionCancelCause(new TurnCancelledError())).toBeUndefined();
+    expect(isSessionCancellation(new TurnCancelledError())).toBe(false);
+    expect(getSessionCancelCause({ sessionCancelCause: "unknown" })).toBeUndefined();
+    expect(getSessionCancelCause(undefined)).toBeUndefined();
   });
 
   it("survives a cause cycle", () => {
     const a = new Error("a");
     const b = new Error("b", { cause: a });
     (a as { cause?: unknown }).cause = b;
-    expect(isSessionLimitDecline(a)).toBe(false);
+    expect(getSessionCancelCause(a)).toBeUndefined();
   });
 });
 

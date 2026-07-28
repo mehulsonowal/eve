@@ -20,7 +20,7 @@ import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import {
-  isSessionLimitDecline,
+  getSessionCancelCause,
   isTurnCancellation,
   throwIfTurnAborted,
 } from "#harness/turn-cancellation.js";
@@ -76,7 +76,7 @@ import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import {
   createWorkflowRuntime,
-  requestWorkflowTurnCancellation,
+  requestWorkflowSessionCancellation,
   startWorkflowPreferLatest,
   turnWorkflowReference,
 } from "#execution/workflow-runtime.js";
@@ -105,7 +105,7 @@ export type DurableStepResult =
       readonly usage?: TokenUsage;
     }
   | {
-      readonly action: "cancelled";
+      readonly action: "cancelled" | "session-cancelled";
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     }
@@ -402,21 +402,25 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   } catch (error) {
     if (!isTurnCancellation(error)) throw error;
     writer.releaseLock();
+    const sessionCancelCause = getSessionCancelCause(error);
     // A declined session-limit prompt stops the whole delegation tree: a
-    // delegated session cancels the root turn before settling itself, and
-    // the root's cancelled arm cascades back down to every descendant. Root
-    // sessions carry no parent lineage and need no upward call — their own
-    // cancelled park runs the cascade. Both `accepted` and `no_active_turn`
-    // are successful outcomes, and the cascade's redundant cancel back to
-    // this already-settling session is a benign no-op.
-    if (isSessionLimitDecline(error)) {
+    // delegated session terminally cancels the root before settling itself,
+    // and the root's cancelled arm cascades back down to every descendant.
+    // Root sessions carry no parent lineage and need no upward call. The
+    // cascade's redundant cancel back to this already-settling session is a
+    // benign no-op. Tree-wide escalation is decline-specific: a generic
+    // session cancellation acts on the session it targets.
+    if (sessionCancelCause === "limit-declined") {
       const rootSessionId = readRootSessionId(input.serializedContext);
       if (rootSessionId !== undefined) {
-        await requestWorkflowTurnCancellation({ sessionId: rootSessionId });
+        await requestWorkflowSessionCancellation({
+          cause: sessionCancelCause,
+          sessionId: rootSessionId,
+        });
       }
     }
     return {
-      action: "cancelled",
+      action: sessionCancelCause === undefined ? "cancelled" : "session-cancelled",
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     };

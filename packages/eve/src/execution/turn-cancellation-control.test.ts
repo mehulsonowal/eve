@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createTurnCancellationControl } from "#execution/turn-cancellation-control.js";
 import { sessionCancelHookToken } from "#execution/turn-cancellation-token.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { getSessionCancelCause, TurnCancelledError } from "#harness/turn-cancellation.js";
 
 const createHookMock = vi.fn();
 
@@ -65,7 +65,7 @@ describe("createTurnCancellationControl", () => {
   });
 
   it("aborts the turn signal on a cancel without a turn guard", async () => {
-    installCancelHook({ payloads: [{}] });
+    installCancelHook({ payloads: [{ kind: "turn" }] });
 
     const control = await createTurnCancellationControl({
       expectedTurnId: "turn_0",
@@ -78,7 +78,7 @@ describe("createTurnCancellationControl", () => {
   });
 
   it("aborts on a cancel whose guard matches the active turn", async () => {
-    installCancelHook({ payloads: [{ turnId: "turn_2" }] });
+    installCancelHook({ payloads: [{ kind: "turn", turnId: "turn_2" }] });
 
     const control = await createTurnCancellationControl({
       expectedTurnId: "turn_2",
@@ -90,7 +90,12 @@ describe("createTurnCancellationControl", () => {
   });
 
   it("consumes a stale turn guard as a no-op and honors the next matching cancel", async () => {
-    installCancelHook({ payloads: [{ turnId: "turn_99" }, { turnId: "turn_2" }] });
+    installCancelHook({
+      payloads: [
+        { kind: "turn", turnId: "turn_99" },
+        { kind: "turn", turnId: "turn_2" },
+      ],
+    });
 
     const control = await createTurnCancellationControl({
       expectedTurnId: "turn_2",
@@ -101,8 +106,20 @@ describe("createTurnCancellationControl", () => {
     expect(control!.signal.aborted).toBe(true);
   });
 
+  it("preserves a session cancellation's cause as the abort reason", async () => {
+    installCancelHook({ payloads: [{ cause: "limit-declined", kind: "session" }] });
+
+    const control = await createTurnCancellationControl({
+      expectedTurnId: "turn_0",
+      sessionId: "session-1",
+    });
+
+    await expect(control!.requested).resolves.toBe("cancel");
+    expect(getSessionCancelCause(control!.signal.reason)).toBe("limit-declined");
+  });
+
   it("never aborts when only mismatched guards arrive", async () => {
-    installCancelHook({ payloads: [{ turnId: "turn_99" }] });
+    installCancelHook({ payloads: [{ kind: "turn", turnId: "turn_99" }] });
 
     const control = await createTurnCancellationControl({
       expectedTurnId: "turn_2",
