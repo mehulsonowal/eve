@@ -14,7 +14,7 @@ import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import { createFakePrompter, type FakePrompterConfig } from "#internal/testing/fake-prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { runChannelsAddCommand, type CliLogger } from "./channels.js";
+import { runChannelsAddCompatibilityCommand, type CliLogger } from "./channels.js";
 
 class TestLogger implements CliLogger {
   readonly errors: string[] = [];
@@ -146,12 +146,12 @@ afterEach(() => {
   process.exitCode = undefined;
 });
 
-describe("runChannelsAddCommand", () => {
+describe("runChannelsAddCompatibilityCommand", () => {
   test("refuses a directory without an eve agent using the shared init guidance", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "eve-channels-empty-"));
     const logger = new TestLogger();
 
-    await runChannelsAddCommand(logger, projectRoot, { kind: "web", options: {} });
+    await runChannelsAddCompatibilityCommand(logger, projectRoot, { kind: "web", options: {} });
 
     expect(logger.errors).toEqual([
       "No eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
@@ -166,12 +166,13 @@ describe("runChannelsAddCommand", () => {
     const addChannelsDeps = createAddChannelsDeps();
     const deployProjectDeps = createDeployProjectDeps();
 
-    await runChannelsAddCommand(
+    await runChannelsAddCompatibilityCommand(
       logger,
       projectRoot,
       { kind: "slack", options: { force: true, yes: true } },
       {
         createPrompter: () => fake.prompter,
+        installRegistryItem: vi.fn(async () => {}),
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => DEPLOYED),
         getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
         addChannelsDeps,
@@ -211,12 +212,13 @@ describe("runChannelsAddCommand", () => {
     const fake = createTestPrompter();
     const addChannelsDeps = createAddChannelsDeps({ state: "linked", projectId: "prj_demo" });
 
-    await runChannelsAddCommand(
+    await runChannelsAddCompatibilityCommand(
       logger,
       projectRoot,
       { kind: "slack", options: { yes: true } },
       {
         createPrompter: () => fake.prompter,
+        installRegistryItem: vi.fn(async () => {}),
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
         getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
         addChannelsDeps,
@@ -237,12 +239,13 @@ describe("runChannelsAddCommand", () => {
     const addChannelsDeps = createAddChannelsDeps({ state: "linked", projectId: "prj_demo" });
     const deployProjectDeps = createDeployProjectDeps();
 
-    await runChannelsAddCommand(
+    await runChannelsAddCompatibilityCommand(
       logger,
       projectRoot,
       { kind: "slack", options: {} },
       {
         createPrompter: () => fake.prompter,
+        installRegistryItem: vi.fn(async () => {}),
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
         getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
         addChannelsDeps,
@@ -271,7 +274,7 @@ describe("runChannelsAddCommand", () => {
     const detectDeployment = vi.fn(async (): Promise<DeploymentInfo> => UNLINKED);
 
     await withInteractiveTerminal(() =>
-      runChannelsAddCommand(
+      runChannelsAddCompatibilityCommand(
         logger,
         projectRoot,
         { options: { yes: true } },
@@ -309,12 +312,13 @@ describe("runChannelsAddCommand", () => {
 
     process.chdir(projectRoot);
     try {
-      await runChannelsAddCommand(
+      await runChannelsAddCompatibilityCommand(
         logger,
         projectRoot,
         { kind: "web", options: { yes: true } },
         {
           createPrompter: () => fake.prompter,
+          installRegistryItem: vi.fn(async () => {}),
           detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
           getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
           addChannelsDeps,
@@ -367,12 +371,13 @@ describe("runChannelsAddCommand", () => {
     const deployProjectDeps = createDeployProjectDeps();
 
     await withInteractiveTerminal(() =>
-      runChannelsAddCommand(
+      runChannelsAddCompatibilityCommand(
         logger,
         projectRoot,
         { options: {} },
         {
           createPrompter: () => fake.prompter,
+          installRegistryItem: vi.fn(async () => {}),
           detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
           getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
           addChannelsDeps,
@@ -398,12 +403,13 @@ describe("runChannelsAddCommand", () => {
     });
     const addChannelsDeps = createAddChannelsDeps();
 
-    await runChannelsAddCommand(
+    await runChannelsAddCompatibilityCommand(
       logger,
       projectRoot,
       { kind: "slack", options: {} },
       {
         createPrompter: () => fake.prompter,
+        installRegistryItem: vi.fn(async () => {}),
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
         getVercelAuthStatus: vi.fn(async (): Promise<"logged-out"> => "logged-out"),
         addChannelsDeps,
@@ -421,12 +427,13 @@ describe("runChannelsAddCommand", () => {
     const fake = createTestPrompter({ single: () => "portable" });
     const addChannelsDeps = createAddChannelsDeps();
 
-    await runChannelsAddCommand(
+    await runChannelsAddCompatibilityCommand(
       logger,
       projectRoot,
       { kind: "slack", options: {} },
       {
         createPrompter: () => fake.prompter,
+        installRegistryItem: vi.fn(async () => {}),
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
         getVercelAuthStatus: vi.fn(async (): Promise<"unavailable"> => "unavailable"),
         addChannelsDeps,
@@ -461,12 +468,13 @@ describe("runChannelsAddCommand", () => {
     );
     const fake = createTestPrompter();
 
-    await runChannelsAddCommand(
+    await runChannelsAddCompatibilityCommand(
       logger,
       projectRoot,
       { kind: "web", options: {} },
       {
         createPrompter: () => fake.prompter,
+        installRegistryItem: vi.fn(async () => {}),
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
         getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
       },
@@ -501,12 +509,13 @@ describe("runChannelsAddCommand", () => {
     const fake = createTestPrompter();
     const addChannelsDeps = createAddChannelsDeps();
 
-    await runChannelsAddCommand(
+    await runChannelsAddCompatibilityCommand(
       logger,
       projectRoot,
       { kind: "slack", options: {} },
       {
         createPrompter: () => fake.prompter,
+        installRegistryItem: vi.fn(async () => {}),
         detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
         getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
         addChannelsDeps,
@@ -568,12 +577,13 @@ describe("runChannelsAddCommand", () => {
     const deployProjectDeps = createDeployProjectDeps();
 
     await withInteractiveTerminal(() =>
-      runChannelsAddCommand(
+      runChannelsAddCompatibilityCommand(
         logger,
         projectRoot,
         { options: {} },
         {
           createPrompter: () => fake.prompter,
+          installRegistryItem: vi.fn(async () => {}),
           detectDeployment: vi.fn(async (): Promise<DeploymentInfo> => UNLINKED),
           getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
           addChannelsDeps,

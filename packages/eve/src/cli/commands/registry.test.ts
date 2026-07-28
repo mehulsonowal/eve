@@ -79,15 +79,19 @@ describe("registry commands", () => {
   });
 
   it.each(["web", "slack"] as const)(
-    "routes registry metadata for %s through channel setup",
+    "installs the official %s item before running its declared setup",
     async (kind) => {
       const logger = createLogger();
-      const runChannelsAddCommand = vi.fn(async () => {});
+      const runSetupCommand = vi.fn(async () => {});
       getRegistryItems.mockResolvedValue([
         {
           name: `channel/${kind}`,
           type: "registry:item",
-          meta: { eve: { channel: kind } },
+          meta: {
+            eve: {
+              setup: { command: "eve", args: ["integration", "setup", kind] },
+            },
+          },
         },
       ]);
 
@@ -96,20 +100,25 @@ describe("registry commands", () => {
         "/project",
         `channel/${kind}`,
         { overwrite: true },
-        { loadChannelsAddCommand: async () => runChannelsAddCommand },
+        {
+          loadSetupCommandRunner: async () => runSetupCommand,
+        },
       );
 
-      expect(runChannelsAddCommand).toHaveBeenCalledWith(logger, "/project", {
-        kind,
-        options: {},
+      expect(addRegistryItems).toHaveBeenCalledOnce();
+      expect(addRegistryItems.mock.invocationCallOrder[0]).toBeLessThan(
+        runSetupCommand.mock.invocationCallOrder[0]!,
+      );
+      expect(runSetupCommand).toHaveBeenCalledWith("/project", {
+        command: "eve",
+        args: ["integration", "setup", kind],
       });
-      expect(addRegistryItems).not.toHaveBeenCalled();
     },
   );
 
-  it("does not infer channel setup from the item address", async () => {
+  it("does not infer setup from the item address", async () => {
     const logger = createLogger();
-    const runChannelsAddCommand = vi.fn(async () => {});
+    const runSetupCommand = vi.fn(async () => {});
     getRegistryItems.mockResolvedValue([{ name: "channel/web", type: "registry:item" }]);
 
     await runAddCommand(
@@ -118,28 +127,60 @@ describe("registry commands", () => {
       "channel/web",
       {},
       {
-        loadChannelsAddCommand: async () => runChannelsAddCommand,
+        loadSetupCommandRunner: async () => runSetupCommand,
       },
     );
 
-    expect(runChannelsAddCommand).not.toHaveBeenCalled();
+    expect(runSetupCommand).not.toHaveBeenCalled();
     expect(addRegistryItems).toHaveBeenCalledOnce();
   });
 
-  it("rejects unknown channel metadata", async () => {
+  it("does not execute setup metadata from a URL item", async () => {
+    const logger = createLogger();
+    const runSetupCommand = vi.fn(async () => {});
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/web",
+        type: "registry:item",
+        meta: {
+          eve: {
+            setup: { command: "eve", args: ["integration", "setup", "web"] },
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "https://example.com/channel/web.json",
+      {},
+      {
+        loadSetupCommandRunner: async () => runSetupCommand,
+      },
+    );
+
+    expect(runSetupCommand).not.toHaveBeenCalled();
+    expect(addRegistryItems).toHaveBeenCalledOnce();
+  });
+
+  it("rejects invalid official setup metadata before installation", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([
       {
         name: "channel/unknown",
         type: "registry:item",
-        meta: { eve: { channel: "unknown" } },
+        meta: {
+          eve: {
+            setup: { command: "sh", args: ["-c", "echo nope"] },
+          },
+        },
       },
     ]);
 
     await runAddCommand(logger, "/project", "channel/unknown", {});
 
     expect(logger.errors).toHaveLength(1);
-    expect(logger.errors[0]).toContain("Unknown eve channel kind in registry metadata: unknown");
     expect(addRegistryItems).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });

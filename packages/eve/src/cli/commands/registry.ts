@@ -5,10 +5,10 @@ import {
   type RegistryConfig,
 } from "#compiled/shadcn-registry/index.js";
 import { z } from "#compiled/zod/index.js";
-import { isEveProject, type ChannelKind } from "#setup/scaffold/index.js";
+import { isEveProject } from "#setup/scaffold/index.js";
 
-import type { runChannelsAddCommand } from "./channels.js";
 import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
+import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
 
 export interface RegistryCommandLogger {
@@ -21,11 +21,12 @@ export interface AddCommandOptions {
 }
 
 export interface AddCommandDependencies {
-  loadChannelsAddCommand(): Promise<typeof runChannelsAddCommand>;
+  loadSetupCommandRunner(): Promise<typeof runRegistrySetupCommand>;
 }
 
 const defaultAddCommandDependencies: AddCommandDependencies = {
-  loadChannelsAddCommand: async () => (await import("./channels.js")).runChannelsAddCommand,
+  loadSetupCommandRunner: async () =>
+    (await import("./registry-setup-command.js")).runRegistrySetupCommand,
 };
 
 const OFFICIAL_REGISTRY = "https://eve.dev/r";
@@ -39,15 +40,29 @@ function itemAddress(item: string): string {
   return isRegistryAddress(item) ? item : `${OFFICIAL_REGISTRY}/${item}.json`;
 }
 
+/** Installs an official registry item without running its declared setup command. */
+export async function installOfficialRegistryItem(
+  appRoot: string,
+  item: string,
+  options: AddCommandOptions = {},
+): Promise<void> {
+  const config = await readRegistryConfig(appRoot);
+  await addRegistryItems([itemAddress(item)], { ...options, config, cwd: appRoot });
+}
+
 const EveRegistryItemMetadataSchema = z.object({
   meta: z
     .object({
       eve: z
         .object({
-          channel: z
-            .enum(["slack", "web"], {
-              error: (issue) =>
-                `Unknown eve channel kind in registry metadata: ${String(issue.input)}`,
+          setup: z
+            .object({
+              command: z.literal("eve"),
+              args: z.tuple([
+                z.literal("integration"),
+                z.literal("setup"),
+                z.enum(["slack", "web"]),
+              ]),
             })
             .optional(),
         })
@@ -56,8 +71,16 @@ const EveRegistryItemMetadataSchema = z.object({
     .optional(),
 });
 
-function channelKindFromRegistryItem(item: unknown): ChannelKind | undefined {
-  return EveRegistryItemMetadataSchema.parse(item).meta?.eve?.channel;
+type EveSetupCommand = NonNullable<
+  NonNullable<NonNullable<z.infer<typeof EveRegistryItemMetadataSchema>["meta"]>["eve"]>["setup"]
+>;
+
+function setupCommandFromRegistryItem(item: unknown): EveSetupCommand | undefined {
+  return EveRegistryItemMetadataSchema.parse(item).meta?.eve?.setup;
+}
+
+function isOfficialItemAddress(address: string): boolean {
+  return address.startsWith(`${OFFICIAL_REGISTRY}/`);
 }
 
 function errorMessage(error: unknown): string {
@@ -142,17 +165,16 @@ export async function runAddCommand(
     const config = await readRegistryConfig(appRoot);
     const address = itemAddress(item);
     const [registryItem] = await getRegistryItems([address], { config });
-    const channelKind = channelKindFromRegistryItem(registryItem);
-    if (channelKind !== undefined) {
-      const runChannelsAddCommand = await dependencies.loadChannelsAddCommand();
-      await runChannelsAddCommand(logger, appRoot, {
-        kind: channelKind,
-        options: {},
-      });
-      return;
-    }
+    const setup = isOfficialItemAddress(address)
+      ? setupCommandFromRegistryItem(registryItem)
+      : undefined;
 
     await addRegistryItems([address], { ...options, config, cwd: appRoot });
+
+    if (setup !== undefined) {
+      const runSetupCommand = await dependencies.loadSetupCommandRunner();
+      await runSetupCommand(appRoot, setup);
+    }
   });
 }
 

@@ -56,6 +56,7 @@ export interface AddChannelCommandOptions {
 
 export interface ChannelsAddDependencies {
   createPrompter?: () => Prompter;
+  installRegistryItem?: (appRoot: string, item: string) => Promise<void>;
   detectDeployment(projectPath: string): Promise<DeploymentInfo>;
   /** Read-only Vercel session probe. Optional only for legacy test seams. */
   getVercelAuthStatus(projectPath: string): Promise<VercelAuthStatus>;
@@ -142,6 +143,13 @@ async function runAddChannelsFlow(
   let finalState = selected.state;
   const ui = createChannelSetupUi({ asker: interactiveAsker(prompter), prompter });
   for (const selectedKind of selected.state.channelSelection) {
+    const installRegistryItem =
+      dependencies.installRegistryItem ??
+      (async (projectRoot: string, item: string) => {
+        const { installOfficialRegistryItem } = await import("./registry.js");
+        await installOfficialRegistryItem(projectRoot, item);
+      });
+    await installRegistryItem(appRoot, `channel/${selectedKind}`);
     const result = await channelSetupIntegration(selectedKind).setup({
       environment,
       state: { ...finalState, channelSelection: [selectedKind] },
@@ -149,6 +157,7 @@ async function runAddChannelsFlow(
       force: options.force,
       presetCreateSlackbot: options.yes ? true : undefined,
       presetPortableCredentials: options.yes === true ? true : undefined,
+      skipDependencyMutation: true,
       deps: dependencies.addChannelsDeps,
     });
     if (result.kind === "cancelled") return;
@@ -174,7 +183,7 @@ async function runAddChannelsFlow(
   prompter.outro(finalState.channels.length === 0 ? "No channels added." : "Channels added.");
 }
 
-export async function runChannelsAddCommand(
+export async function runChannelsAddCompatibilityCommand(
   logger: CliLogger,
   appRoot: string,
   args: { kind?: string; options: AddChannelCommandOptions },
@@ -188,6 +197,11 @@ export async function runChannelsAddCommand(
 
   try {
     const kind = args.kind === undefined ? undefined : parseChannelKind(args.kind);
+    if (kind !== undefined && dependencies === defaultChannelsAddDependencies) {
+      const { runAddCommand } = await import("./registry.js");
+      await runAddCommand(logger, appRoot, `channel/${kind}`, {});
+      return;
+    }
     await runAddChannelsFlow(appRoot, kind, args.options, dependencies);
   } catch (error) {
     logger.error(error instanceof Error ? error.message : String(error));

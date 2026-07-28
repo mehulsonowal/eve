@@ -264,8 +264,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .option("-f, --force", "Overwrite existing channel files")
     .option("-y, --yes", "Assume yes for confirmations; requires an explicit channel kind")
     .action(async (kind: string | undefined, options: { force?: boolean; yes?: boolean }) => {
-      const { runChannelsAddCommand } = await import("#cli/commands/channels.js");
-      await runChannelsAddCommand(logger, appRoot, { kind, options });
+      const { runChannelsAddCompatibilityCommand } = await import("#cli/commands/channels.js");
+      await runChannelsAddCompatibilityCommand(logger, appRoot, { kind, options });
     });
 
   channels
@@ -275,6 +275,17 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .action(async (options: { json?: boolean }) => {
       const { runChannelsListCommand } = await import("#cli/commands/channels.js");
       await runChannelsListCommand(logger, appRoot, options);
+    });
+
+  program
+    .command("integration", { hidden: true })
+    .command("setup <kind>")
+    .action(async (kind: string) => {
+      if (kind !== "slack" && kind !== "web") {
+        throw new InvalidArgumentError(`Unknown integration "${kind}".`);
+      }
+      const { runIntegrationSetupCommand } = await import("#cli/commands/integration-setup.js");
+      await runIntegrationSetupCommand(logger, appRoot, kind);
     });
 
   const extension = program
