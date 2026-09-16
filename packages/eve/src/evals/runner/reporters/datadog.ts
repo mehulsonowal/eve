@@ -523,7 +523,7 @@ function resolveResultMetadata(
   });
   const runtimeTraceLinks = resolveRuntimeTraceLinks(result.result.traceContexts);
   if (runtimeTraceLinks.length > 0) {
-    metadata.eveRuntimeTraceLinks = runtimeTraceLinks;
+    metadata.experimentRuntimeTraceLinks = runtimeTraceLinks;
   }
   if (recordAssertionDetails) {
     const failedAssertions = result.assertions
@@ -543,7 +543,7 @@ function resolveRuntimeTraceLinks(traceContexts: EveEvalResult["result"]["traceC
   const links = new Map<
     string,
     {
-      relation: "eve_runtime";
+      relation: "experiment_runtime";
       traceId: string;
       spanId: string;
       sessionId: string;
@@ -557,7 +557,7 @@ function resolveRuntimeTraceLinks(traceContexts: EveEvalResult["result"]["traceC
     if (existing?.primary || (existing && !traceContext.primary)) continue;
 
     links.set(key, {
-      relation: "eve_runtime",
+      relation: "experiment_runtime",
       traceId: traceContext.traceId,
       spanId: traceContext.spanId,
       sessionId: traceContext.sessionId,

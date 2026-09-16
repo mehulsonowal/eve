@@ -201,7 +201,7 @@ describe("Datadog", () => {
     expect(submittedSpan).not.toHaveProperty("metadata.expectedOutput");
     expect(submittedSpan).not.toHaveProperty("metadata.expected");
     expect(submittedSpan).not.toHaveProperty("metadata.expected_output");
-    expect(submittedSpan).not.toHaveProperty("metadata.eveRuntimeTraceLinks");
+    expect(submittedSpan).not.toHaveProperty("metadata.experimentRuntimeTraceLinks");
     expect(experiment.submitEvaluationMetrics).toHaveBeenCalledWith(span, [
       expect.objectContaining({ label: "gate_succeeded", value: 1 }),
       expect.objectContaining({ label: "similarity", value: 0.9 }),
@@ -259,16 +259,16 @@ describe("Datadog", () => {
     expect(experiment.submitSpan).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({
-          eveRuntimeTraceLinks: [
+          experimentRuntimeTraceLinks: [
             {
-              relation: "eve_runtime",
+              relation: "experiment_runtime",
               traceId: "0123456789abcdef0123456789abcdef",
               spanId: "0123456789abcdef",
               sessionId: "primary-session",
               primary: true,
             },
             {
-              relation: "eve_runtime",
+              relation: "experiment_runtime",
               traceId: "fedcba9876543210fedcba9876543210",
               spanId: "fedcba9876543210",
               sessionId: "secondary-session",
@@ -307,8 +307,8 @@ describe("Datadog", () => {
       expect(experiment.submitSpan).toHaveBeenCalledWith(
         expect.objectContaining({
           metadata: expect.objectContaining({
-            eveRuntimeTraceLinks: [
-              expect.objectContaining({ relation: "eve_runtime", primary: true }),
+            experimentRuntimeTraceLinks: [
+              expect.objectContaining({ relation: "experiment_runtime", primary: true }),
             ],
           }),
         }),
@@ -513,7 +513,7 @@ describe("Datadog", () => {
         expectedOutput: "helpful onboarding answer",
         datasetRecordId: "record-1",
         metadata: expect.objectContaining({
-          eveRuntimeTraceLinks: [
+          experimentRuntimeTraceLinks: [
             expect.objectContaining({
               traceId: "0123456789abcdef0123456789abcdef",
               spanId: "0123456789abcdef",
