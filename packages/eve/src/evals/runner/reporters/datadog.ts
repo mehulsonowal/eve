@@ -623,7 +623,11 @@ function elapsedMs(startedAt: string, completedAt: string): number | undefined {
   const start = Date.parse(startedAt);
   const completed = Date.parse(completedAt);
   if (!Number.isFinite(start) || !Number.isFinite(completed)) return undefined;
-  return Math.max(0, completed - start);
+
+  // ISO timestamps have millisecond precision, so fast failures can start and
+  // finish in the same millisecond. Datadog Experiment spans require a
+  // positive duration; use the smallest representable duration in these units.
+  return Math.max(1, completed - start);
 }
 
 function toOptionalDatadogJsonValue(value: unknown): DatadogJsonValue | undefined {

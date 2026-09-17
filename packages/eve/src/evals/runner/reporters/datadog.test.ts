@@ -220,6 +220,21 @@ describe("Datadog", () => {
     );
   });
 
+  it("uses a positive duration for evals completed within the same millisecond", async () => {
+    const { config, experiment } = makeConfig();
+    const reporter = Datadog(config);
+    const evaluation = makeEval();
+    const result = makeEvalResult({
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await reporter.onRunStart([evaluation], makeTarget());
+    await reporter.onEvalComplete(result);
+
+    expect(experiment.submitSpan).toHaveBeenCalledWith(expect.objectContaining({ durationMs: 1 }));
+  });
+
   it("records deduplicated runtime trace links across sessions", async () => {
     const { config, experiment } = makeConfig();
     const reporter = Datadog(config);
