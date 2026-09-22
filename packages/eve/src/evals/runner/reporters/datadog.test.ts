@@ -303,10 +303,10 @@ describe("Datadog", () => {
         ...makeEvalResult().result,
         traceContexts: [
           {
-            traceId: "d7e474dfd174888c70497fb0cccf9d2f",
-            spanId: "7b5236b79381cbda",
+            traceId: "010280a6f337b4e3117b3db95c1ad3fe",
+            spanId: "140edab97d7fb4ef",
             traceFlags: 1,
-            sessionId: "wrun_01M32YEDJ8NNT90RZ66K5JXWTJ",
+            sessionId: "wrun_01M3533VV7F1M7FF5J8NQ3W7G8",
             primary: true,
           },
         ],
@@ -322,9 +322,9 @@ describe("Datadog", () => {
           experimentRuntimeTraceLinks: [
             {
               relation: "experiment_runtime",
-              traceId: "4b0b052a3ccd5417a2042f5b1b3010dd",
-              spanId: "8886225176837082074",
-              sessionId: "wrun_01M32YEDJ8NNT90RZ66K5JXWTJ",
+              traceId: "e4eea2b9661c5e3890ed96de9715238e",
+              spanId: "1445333020641834223",
+              sessionId: "wrun_01M3533VV7F1M7FF5J8NQ3W7G8",
               primary: true,
             },
           ],
