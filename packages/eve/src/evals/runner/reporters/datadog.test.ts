@@ -277,21 +277,92 @@ describe("Datadog", () => {
           experimentRuntimeTraceLinks: [
             {
               relation: "experiment_runtime",
-              traceId: "0123456789abcdef0123456789abcdef",
-              spanId: "0123456789abcdef",
+              traceId: "de2115902b695b58838ac6a242f54df3",
+              spanId: "81985529216486895",
               sessionId: "primary-session",
               primary: true,
             },
             {
               relation: "experiment_runtime",
-              traceId: "fedcba9876543210fedcba9876543210",
-              spanId: "fedcba9876543210",
+              traceId: "ae1188185c31500cb5507bd9022ab33d",
+              spanId: "18364758544493064720",
               sessionId: "secondary-session",
               primary: false,
             },
           ],
         }),
       }),
+    );
+  });
+
+  it("stores the Datadog-indexed IDs for a real W3C runtime context", async () => {
+    const { config, experiment } = makeConfig();
+    const reporter = Datadog(config);
+    const result = makeEvalResult({
+      result: {
+        ...makeEvalResult().result,
+        traceContexts: [
+          {
+            traceId: "d7e474dfd174888c70497fb0cccf9d2f",
+            spanId: "7b5236b79381cbda",
+            traceFlags: 1,
+            sessionId: "wrun_01M32YEDJ8NNT90RZ66K5JXWTJ",
+            primary: true,
+          },
+        ],
+      },
+    });
+
+    await reporter.onRunStart([makeEval()], makeTarget());
+    await reporter.onEvalComplete(result);
+
+    expect(experiment.submitSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          experimentRuntimeTraceLinks: [
+            {
+              relation: "experiment_runtime",
+              traceId: "b56b366774695dc5a50e8cf47f1110c0",
+              spanId: "8886225176837082074",
+              sessionId: "wrun_01M32YEDJ8NNT90RZ66K5JXWTJ",
+              primary: true,
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("omits unsampled and invalid runtime trace contexts", async () => {
+    const { config, experiment } = makeConfig();
+    const reporter = Datadog(config);
+    const result = makeEvalResult({
+      result: {
+        ...makeEvalResult().result,
+        traceContexts: [
+          {
+            traceId: "0123456789abcdef0123456789abcdef",
+            spanId: "0123456789abcdef",
+            traceFlags: 0,
+            sessionId: "unsampled",
+            primary: true,
+          },
+          {
+            traceId: "invalid",
+            spanId: "invalid",
+            traceFlags: 1,
+            sessionId: "invalid",
+            primary: false,
+          },
+        ],
+      },
+    });
+
+    await reporter.onRunStart([makeEval()], makeTarget());
+    await reporter.onEvalComplete(result);
+
+    expect(experiment.submitSpan.mock.calls[0]?.[0]).not.toHaveProperty(
+      "metadata.experimentRuntimeTraceLinks",
     );
   });
 
@@ -530,8 +601,8 @@ describe("Datadog", () => {
         metadata: expect.objectContaining({
           experimentRuntimeTraceLinks: [
             expect.objectContaining({
-              traceId: "0123456789abcdef0123456789abcdef",
-              spanId: "0123456789abcdef",
+              traceId: "de2115902b695b58838ac6a242f54df3",
+              spanId: "81985529216486895",
             }),
           ],
         }),

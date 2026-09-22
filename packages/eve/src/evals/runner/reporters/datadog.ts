@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 
 import type ddTrace from "dd-trace";
@@ -349,6 +350,13 @@ class DatadogReporter implements EvalReporter {
 }
 
 const DD_TRACE_PACKAGE = "dd-trace";
+// Keep this namespace aligned with dd-go's APM-to-LLMObs trace-indexer processor.
+// It derives the indexed LLMObs trace ID as UUID v5 (SHA-1) of the canonical
+// 128-bit APM trace ID. LLMObs span IDs are the same unsigned 64-bit value in
+// decimal rather than the W3C hexadecimal representation Eve receives.
+const DATADOG_LLMOBS_TRACE_ID_NAMESPACE = Buffer.from("f47ac10b58cc4372a5670e02b2c3d479", "hex");
+const W3C_TRACE_ID_PATTERN = /^[0-9a-f]{32}$/iu;
+const W3C_SPAN_ID_PATTERN = /^[0-9a-f]{16}$/iu;
 const EXPECTED_OUTPUT_METADATA_KEYS: ReadonlySet<string> = new Set([
   "expectedOutput",
   "expected",
@@ -552,20 +560,51 @@ function resolveRuntimeTraceLinks(traceContexts: EveEvalResult["result"]["traceC
   >();
 
   for (const traceContext of traceContexts) {
-    const key = `${traceContext.traceId}:${traceContext.spanId}`;
+    if ((traceContext.traceFlags & 1) === 0) continue;
+    const traceId = toDatadogLlmobsTraceId(traceContext.traceId);
+    const spanId = toDatadogLlmobsSpanId(traceContext.spanId);
+    if (traceId === undefined || spanId === undefined) continue;
+
+    const key = `${traceId}:${spanId}`;
     const existing = links.get(key);
     if (existing?.primary || (existing && !traceContext.primary)) continue;
 
     links.set(key, {
       relation: "experiment_runtime",
-      traceId: traceContext.traceId,
-      spanId: traceContext.spanId,
+      traceId,
+      spanId,
       sessionId: traceContext.sessionId,
       primary: traceContext.primary,
     });
   }
 
   return [...links.values()];
+}
+
+function toDatadogLlmobsTraceId(traceId: string): string | undefined {
+  const canonicalTraceId = traceId.toLowerCase();
+  if (
+    !W3C_TRACE_ID_PATTERN.test(canonicalTraceId) ||
+    canonicalTraceId === "00000000000000000000000000000000"
+  ) {
+    return undefined;
+  }
+
+  const hash = createHash("sha1")
+    .update(DATADOG_LLMOBS_TRACE_ID_NAMESPACE)
+    .update(canonicalTraceId)
+    .digest()
+    .subarray(0, 16);
+  hash[6] = (hash[6]! & 0x0f) | 0x50;
+  hash[8] = (hash[8]! & 0x3f) | 0x80;
+  return hash.toString("hex");
+}
+
+function toDatadogLlmobsSpanId(spanId: string): string | undefined {
+  if (!W3C_SPAN_ID_PATTERN.test(spanId) || spanId === "0000000000000000") {
+    return undefined;
+  }
+  return BigInt(`0x${spanId}`).toString(10);
 }
 
 function resolveEvaluationMetrics(
