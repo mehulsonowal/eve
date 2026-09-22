@@ -352,8 +352,9 @@ class DatadogReporter implements EvalReporter {
 const DD_TRACE_PACKAGE = "dd-trace";
 // Keep this namespace aligned with dd-go's APM-to-LLMObs trace-indexer processor.
 // It derives the indexed LLMObs trace ID as UUID v5 (SHA-1) of the canonical
-// 128-bit APM trace ID. LLMObs span IDs are the same unsigned 64-bit value in
-// decimal rather than the W3C hexadecimal representation Eve receives.
+// APM trace ID. Datadog's OTLP intake currently exposes the lower 64 bits of
+// Eve's W3C trace ID to that processor, zero-padded to 128 bits. LLMObs span IDs
+// are the same unsigned 64-bit value in decimal rather than W3C hexadecimal.
 const DATADOG_LLMOBS_TRACE_ID_NAMESPACE = Buffer.from("f47ac10b58cc4372a5670e02b2c3d479", "hex");
 const W3C_TRACE_ID_PATTERN = /^[0-9a-f]{32}$/iu;
 const W3C_SPAN_ID_PATTERN = /^[0-9a-f]{16}$/iu;
@@ -590,9 +591,10 @@ function toDatadogLlmobsTraceId(traceId: string): string | undefined {
     return undefined;
   }
 
+  const canonicalApmTraceId = canonicalTraceId.slice(-16).padStart(32, "0");
   const hash = createHash("sha1")
     .update(DATADOG_LLMOBS_TRACE_ID_NAMESPACE)
-    .update(canonicalTraceId)
+    .update(canonicalApmTraceId)
     .digest()
     .subarray(0, 16);
   hash[6] = (hash[6]! & 0x0f) | 0x50;

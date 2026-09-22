@@ -277,14 +277,14 @@ describe("Datadog", () => {
           experimentRuntimeTraceLinks: [
             {
               relation: "experiment_runtime",
-              traceId: "de2115902b695b58838ac6a242f54df3",
+              traceId: "c6a8d65cb7d45f2cbbcd2b8e57bdd074",
               spanId: "81985529216486895",
               sessionId: "primary-session",
               primary: true,
             },
             {
               relation: "experiment_runtime",
-              traceId: "ae1188185c31500cb5507bd9022ab33d",
+              traceId: "d8464e48436c5124a7b8b5b463a20f61",
               spanId: "18364758544493064720",
               sessionId: "secondary-session",
               primary: false,
@@ -322,7 +322,7 @@ describe("Datadog", () => {
           experimentRuntimeTraceLinks: [
             {
               relation: "experiment_runtime",
-              traceId: "b56b366774695dc5a50e8cf47f1110c0",
+              traceId: "4b0b052a3ccd5417a2042f5b1b3010dd",
               spanId: "8886225176837082074",
               sessionId: "wrun_01M32YEDJ8NNT90RZ66K5JXWTJ",
               primary: true,
@@ -601,7 +601,7 @@ describe("Datadog", () => {
         metadata: expect.objectContaining({
           experimentRuntimeTraceLinks: [
             expect.objectContaining({
-              traceId: "de2115902b695b58838ac6a242f54df3",
+              traceId: "c6a8d65cb7d45f2cbbcd2b8e57bdd074",
               spanId: "81985529216486895",
             }),
           ],
