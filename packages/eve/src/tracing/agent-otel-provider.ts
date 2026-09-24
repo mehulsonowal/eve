@@ -234,7 +234,8 @@ export function createAgentOtelInstrumentation(
               "agent.step.index": event.scope.stepIndex,
               "agent.turn.id": event.scope.turnId,
               "agent.name": event.scope.functionId,
-              ...agentSpanNamingAttributes("agent.step"),
+              "gen_ai.operation.name": "workflow",
+              ...agentSpanNamingAttributes("agent.step", "workflow"),
               ...agentTraceIdentityAttributes({
                 rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
                 sessionId: event.scope.sessionId,
