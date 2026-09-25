@@ -2634,6 +2634,12 @@ describe("createAgentOtelInstrumentation", () => {
     const spans = runtime.exporter.getFinishedSpans();
     const model = byName(spans, "chat claude-test")[0]!;
     const tool = byName(spans, "execute_tool weather")[0]!;
+    const turn = byName(spans, "invoke_agent weather")[0]!;
+    expect(turn.attributes).toMatchObject({
+      "gen_ai.input.messages":
+        '[{"parts":[{"content":"real user text","type":"text"}],"role":"user"}]',
+      "gen_ai.output.messages": expect.stringContaining("Checking the weather."),
+    });
     expect(model.attributes["ai.prompt.system"]).toBe(
       "You are a weather assistant (system prompt).",
     );
@@ -2684,6 +2690,12 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
+    expect(byName(spans, "invoke_agent weather")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.input.messages",
+    );
+    expect(byName(spans, "invoke_agent weather")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.output.messages",
+    );
     expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
       "gen_ai.input.messages",
     );

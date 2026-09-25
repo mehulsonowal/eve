@@ -35,6 +35,11 @@ import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js"
 import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
 import { createAgentMemoryInstrumentation } from "#tracing/agent-memory-instrumentation.js";
 import {
+  rememberTurnInputMessages,
+  rememberTurnOutputMessages,
+  recordTurnUsage,
+} from "#tracing/agent-otel-turn-state.js";
+import {
   readGatewayCost,
   setAgentInvocationUsage,
   setAgentUsage,
@@ -363,7 +368,9 @@ export function createAgentOtelInstrumentation(
     }
   };
 
-  const onModelCallStarted = (event: InstrumentationModelCallStartedEvent): void => {
+  const onModelCallStarted = (
+    event: InstrumentationModelCallStartedEvent,
+  ): void | PromiseLike<void> => {
     const attempt = steps.get(event.scope);
     if (attempt === undefined) return;
     attempt.span.setAttribute("agent.model.id", event.model.modelId);
@@ -387,9 +394,12 @@ export function createAgentOtelInstrumentation(
       },
       attempt.context,
     );
+    let inputMessagesAttribute: string | undefined;
     if (recordInputs && event.input !== undefined) {
-      const genAiMessages = genAiInputMessagesAttribute(event.input.messages);
-      if (genAiMessages !== undefined) span.setAttribute("gen_ai.input.messages", genAiMessages);
+      inputMessagesAttribute = genAiInputMessagesAttribute(event.input.messages);
+      if (inputMessagesAttribute !== undefined) {
+        span.setAttribute("gen_ai.input.messages", inputMessagesAttribute);
+      }
       const system = systemPromptAttribute(event.input.instructions);
       if (system !== undefined) span.setAttribute("ai.prompt.system", system);
       const genAiSystem = genAiSystemInstructionsAttribute(event.input.instructions);
@@ -400,6 +410,7 @@ export function createAgentOtelInstrumentation(
     const state = { context: trace.setSpan(attempt.context, span), span };
     getExecutionContexts(event.scope).set(event.idempotencyKey, state.context);
     getSpanStates(modelSpans, event.scope).set(event.idempotencyKey, state);
+    return rememberTurnInputMessages(input.stateStore, event.scope, inputMessagesAttribute);
   };
 
   const onModelCallTerminal = async (
@@ -411,7 +422,7 @@ export function createAgentOtelInstrumentation(
     if (event.type === "model.call.failed") {
       recordError(state.span, event.error);
     } else {
-      await recordTurnUsage(event);
+      await recordTurnUsage(input.stateStore, event.scope, event.usage);
       setGenAiUsage(state.span, event.usage);
       if (event.responseId !== undefined) {
         state.span.setAttribute("gen_ai.response.id", event.responseId);
@@ -429,6 +440,7 @@ export function createAgentOtelInstrumentation(
         const outputMessages = genAiOutputMessagesAttribute(content, event.finishReason);
         if (outputMessages !== undefined) {
           state.span.setAttribute("gen_ai.output.messages", outputMessages);
+          await rememberTurnOutputMessages(input.stateStore, event.scope, outputMessages);
         }
         const reasoning = textContentAttribute(
           content
@@ -479,31 +491,6 @@ export function createAgentOtelInstrumentation(
       }
     }
     state.span.end();
-  };
-
-  const recordTurnUsage = async (
-    event: Extract<
-      InstrumentationModelCallTerminalEvent,
-      { readonly type: "model.call.completed" }
-    >,
-  ): Promise<void> => {
-    if (event.usage.inputTokens === undefined && event.usage.outputTokens === undefined) return;
-    // The bridge publishes at most one completion per physical execution.
-    // Workflow retries restart from pre-step state, so abandoned additions are
-    // not merged; distinct completed retries consumed tokens and count here.
-    await input.stateStore.updateTurn(event.scope.sessionId, event.scope.turnId, (turn) => ({
-      ...turn,
-      modelUsage: {
-        inputTokens:
-          event.usage.inputTokens === undefined
-            ? turn.modelUsage?.inputTokens
-            : (turn.modelUsage?.inputTokens ?? 0) + event.usage.inputTokens,
-        outputTokens:
-          event.usage.outputTokens === undefined
-            ? turn.modelUsage?.outputTokens
-            : (turn.modelUsage?.outputTokens ?? 0) + event.usage.outputTokens,
-      },
-    }));
   };
 
   const channelDeliveries = createAgentChannelDeliveryInstrumentation({
