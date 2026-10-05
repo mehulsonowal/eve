@@ -1,6 +1,7 @@
 import {
   ROOT_CONTEXT,
   SpanKind,
+  type Attributes,
   type Context,
   type Span,
   type SpanContext,
@@ -85,6 +86,7 @@ export function createAgentActionInstrumentation(input: {
       startTimeMs: Date.now(),
       stepIndex: event.scope.stepIndex,
       turnId: event.scope.turnId,
+      workflowName: event.isWorkflowTool === true ? event.name : undefined,
     };
     await input.stateStore.setAction(event.idempotencyKey, state);
     if (event.isWorkflowTool === true) {
@@ -108,32 +110,40 @@ export function createAgentActionInstrumentation(input: {
 
   const startSpan = (state: AgentActionTraceState): Span => {
     const invocation = isAgentInvocation(state.kind);
+    const genAiOperation = invocation
+      ? "invoke_agent"
+      : state.workflowName === undefined
+        ? "workflow"
+        : "invoke_workflow";
+    const attributes: Attributes = {
+      "agent.action.call_id": state.callId,
+      "agent.action.kind": state.kind,
+      "agent.action.name": state.name,
+      "agent.framework.name": "eve",
+      "agent.framework.version": input.frameworkVersion,
+      "agent.step.attempt": state.attemptIndex,
+      "agent.step.index": state.stepIndex,
+      "agent.turn.id": state.turnId,
+      "gen_ai.operation.name": genAiOperation,
+      ...agentSpanNamingAttributes(AGENT_SPAN_NAMES.action, genAiOperation),
+      ...agentTraceIdentityAttributes({
+        rootSessionId: state.rootSessionId,
+        traceSessionId: state.traceSessionId,
+        sessionId: state.sessionId,
+      }),
+    };
+    if (state.workflowName !== undefined) {
+      attributes["gen_ai.workflow.name"] = state.workflowName;
+    }
+    if (invocation) {
+      attributes["gen_ai.agent.name"] = state.name;
+      attributes["agent.invocation.role"] = "caller";
+    }
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
         AGENT_SPAN_NAMES.action,
         {
-          attributes: {
-            "agent.action.call_id": state.callId,
-            "agent.action.kind": state.kind,
-            "agent.action.name": state.name,
-            "agent.framework.name": "eve",
-            "agent.framework.version": input.frameworkVersion,
-            "agent.step.attempt": state.attemptIndex,
-            "agent.step.index": state.stepIndex,
-            "agent.turn.id": state.turnId,
-            ...agentSpanNamingAttributes(AGENT_SPAN_NAMES.action),
-            ...agentTraceIdentityAttributes({
-              rootSessionId: state.rootSessionId,
-              traceSessionId: state.traceSessionId,
-              sessionId: state.sessionId,
-            }),
-            ...(invocation
-              ? {
-                  "gen_ai.agent.name": state.name,
-                  "agent.invocation.role": "caller",
-                }
-              : undefined),
-          },
+          attributes,
           kind: state.kind === "remote-agent-call" ? SpanKind.CLIENT : SpanKind.INTERNAL,
           startTime: state.startTimeMs,
         },
