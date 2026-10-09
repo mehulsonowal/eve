@@ -1,6 +1,6 @@
 import { jsonSchema, type JSONSchema7, type ToolSet } from "ai";
 
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { ModelProfile } from "#harness/model-profile.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
   WEB_SEARCH_EXA_OUTPUT_SCHEMA,
@@ -15,7 +15,7 @@ import type { WebSearchProvider } from "#shared/web-search.js";
 /**
  * The provider backend resolved for one web search tool invocation.
  */
-type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel";
+type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel" | "browserbase";
 
 /**
  * Maps an upstream provider tool type (the literal `type` string the AI SDK
@@ -53,7 +53,9 @@ export function resolveFrameworkToolFromUpstreamType(type: string): string | nul
  * Returns the output schema for the provider-managed web search tool that
  * will be injected for `backend`.
  */
-export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObject {
+export function resolveWebSearchOutputSchema(
+  backend: Exclude<WebSearchBackend, "browserbase">,
+): JsonObject {
   switch (backend) {
     case "anthropic":
       return WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA;
@@ -69,38 +71,21 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
 }
 
 /**
- * Determines the web search backend for a model reference.
- *
- * - All AI Gateway models: the configured search provider (Exa by default)
- * - Direct/BYO OpenAI models: native OpenAI search
- * - Direct/BYO Anthropic models: native Anthropic search
- * - Direct/BYO Google models: native Google search grounding
- * - Other BYO models: not available (returns `null`)
+ * Determines the web search backend for a model: the configured search provider (Exa by
+ * default) on AI Gateway, the provider's native search for direct OpenAI, Anthropic, and Google
+ * models, and none (`null`) for any other direct model.
  */
 export function resolveWebSearchBackend(
-  modelRef: RuntimeModelReference,
+  profile: ModelProfile,
   gatewayProvider: WebSearchProvider = "exa",
 ): WebSearchBackend | null {
-  if (modelRef.source === undefined) {
-    return gatewayProvider;
-  }
-
-  const providerId = modelRef.id.split("/")[0] ?? "";
-
-  if (providerId === "openai" || providerId.startsWith("openai.")) {
-    return "openai";
-  }
-
-  if (providerId === "anthropic" || providerId.startsWith("anthropic.")) {
-    return "anthropic";
-  }
-
-  if (providerId.startsWith("google.")) {
-    return "google";
-  }
-
-  return null;
+  if (profile.gateway) return gatewayProvider;
+  return NATIVE_WEB_SEARCH_PROVIDERS.has(profile.provider)
+    ? (profile.provider as WebSearchBackend)
+    : null;
 }
+
+const NATIVE_WEB_SEARCH_PROVIDERS: ReadonlySet<string> = new Set(["anthropic", "google", "openai"]);
 
 /**
  * Constructs the AI SDK provider tool for web search based on the resolved
@@ -113,6 +98,10 @@ export async function resolveWebSearchProviderTool(
   backend: WebSearchBackend,
 ): Promise<ToolSet[string]> {
   switch (backend) {
+    case "browserbase": {
+      const { gateway } = await import("ai");
+      return gateway.tools.browserbaseSearch();
+    }
     case "openai": {
       const { openai } = await import("#compiled/@ai-sdk/openai/index.js");
       return attachWebSearchOutputSchema(openai.tools.webSearch({}) as ToolSet[string], backend);
@@ -154,7 +143,7 @@ export async function resolveWebSearchProviderTool(
 
 function attachWebSearchOutputSchema(
   tool: ToolSet[string],
-  backend: WebSearchBackend,
+  backend: Exclude<WebSearchBackend, "browserbase">,
 ): ToolSet[string] {
   return {
     ...tool,

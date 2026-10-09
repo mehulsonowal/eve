@@ -9,6 +9,7 @@ import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import {
   expectBoolean,
   expectFunction,
@@ -77,7 +78,7 @@ type MutableNormalizedAuthoredTool = {
 type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
-  | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
+  | { readonly kind: "web-search-tool"; readonly provider: WebSearchProvider }
   | {
       readonly kind: "dynamic-tool";
       readonly eventNames: readonly DynamicToolEventName[];
@@ -105,10 +106,15 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
   if (isWebSearchToolDefinition(value)) {
     const record = expectObjectRecord(value, message);
+    if (record.deferred !== undefined) {
+      throw new Error(
+        `${message} Provider tools can't be deferred: the provider has to see their definition. Remove "deferred".`,
+      );
+    }
     expectOnlyKnownKeys(record, ["kind", "provider"], message);
     const provider = expectString(record.provider, message);
-    if (provider !== "exa" && provider !== "parallel") {
-      throw new Error(`${message} Expected "provider" to be one of: exa, parallel.`);
+    if (provider !== "exa" && provider !== "parallel" && provider !== "browserbase") {
+      throw new Error(`${message} Expected "provider" to be one of: exa, parallel, browserbase.`);
     }
     return { kind: "web-search-tool", provider };
   }
@@ -131,6 +137,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     record,
     [
       "availableInSubagents",
+      "deferred",
       "endsTurn",
       "label",
       "auth",
@@ -163,6 +170,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       record.availableInSubagents === undefined
         ? undefined
         : expectBoolean(record.availableInSubagents, message),
+    deferred: record.deferred === undefined ? undefined : expectBoolean(record.deferred, message),
     description: expectString(record.description, message),
     endsTurn:
       record.endsTurn === undefined || typeof record.endsTurn === "boolean"
